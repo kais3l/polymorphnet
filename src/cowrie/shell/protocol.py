@@ -309,6 +309,11 @@ class HoneyPotInteractiveProtocol(HoneyPotBaseProtocol, recvline.HistoricRecvLin
         HoneyPotBaseProtocol.timeoutConnection(self)
 
     def connectionLost(self, reason: failure.Failure = connectionDone) -> None:
+        # --- FIX: Trigger RL Agent Final Reward ---
+        if self.cmdstack and hasattr(self.cmdstack[0], 'connectionLost'):
+            self.cmdstack[0].connectionLost(reason)
+        # ------------------------------------------        
+        
         HoneyPotBaseProtocol.connectionLost(self, reason)
         recvline.HistoricRecvLine.connectionLost(self, reason)
         self.keyHandlers = {}

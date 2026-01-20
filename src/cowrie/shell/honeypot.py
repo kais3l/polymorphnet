@@ -108,9 +108,18 @@ class HoneyPotShell:
         # 3. Get New Action
         # Use epsilon=0.05 to keep exploring a little bit (5%)
         # Or set training=False to be purely exploited.
-        self.rl_agent.epsilon = 0.05 
+        self.rl_agent.epsilon = 0.04
         action = self.rl_agent.get_action(current_state, training=True)
-        
+        print("HELLO WORLD CHECK")
+
+        # LOGGING: Record the action for analysis
+        action_names = ['ALLOW', 'FAKE', 'DELAY', 'BLOCK']
+        log.msg(eventid='cowrie.rl.action', 
+                action_code=action, 
+                action_name=action_names[action], 
+                state_summary=f"{self.session_duration}:{self.command_count}",
+                format="RL Action: %(action_name)s (State: %(state_summary)s)"
+        )        
         self.last_state = current_state
         self.last_action = action
         
@@ -131,7 +140,7 @@ class HoneyPotShell:
         # --- RL AGENT LOGIC END ---
 
     def _internal_lineReceived(self, line: str) -> None:
-                log.msg(eventid="cowrie.command.input", input=line, format="CMD: %(input)s")
+        log.msg(eventid="cowrie.command.input", input=line, format="CMD: %(input)s")
         self.lexer = shlex.shlex(instream=line, punctuation_chars=True, posix=True)
         # Add these special characters that are not in the default lexer
         self.lexer.wordchars += "@%{}=$:+^,()`"
@@ -232,7 +241,9 @@ class HoneyPotShell:
             # Bonus +10 if they stayed for > 10 commands
             # Penalty -10 if they left immediately (< 2 commands)
             final_reward = -1.0
-            if self.command_count > 10:
+            if self.last_action == 3:
+                final_reward = 6
+            elif self.command_count > 10:
                 final_reward = 10.0
             elif self.command_count < 2:
                 final_reward = -10.0
