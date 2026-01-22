@@ -22,7 +22,7 @@ from cowrie.shell.pipe import PipeProtocol
 
 import torch
 import numpy as np
-from cowrie.core.agent import DQNAgent # Assuming you placed agent.py in cowrie/core/
+from cowrie.shell.agent import DQNAgent # Assuming you placed agent.py in cowrie/core/
 
 # Pre-compiled regexes for environment variable expansion
 _ENV_BRACE_RE = re.compile(r"^\${([_a-zA-Z0-9]+)}$")
@@ -46,7 +46,6 @@ def get_command_category(cmd_line):
     if cmd in exec_cmds: return 3
     if cmd in edit_cmds: return 4
     return 5 
-
 # HELPER: Dynamic File Creation
 def create_fake_file(protocol, filename):
     try:
@@ -57,6 +56,7 @@ def create_fake_file(protocol, filename):
     except Exception:
         pass
     return False
+
 
 class HoneyPotShell:
     def __init__(
@@ -72,16 +72,19 @@ class HoneyPotShell:
             self.environ["LINES"] = str(protocol.user.windowSize[0])
         self.lexer: shlex.shlex | None = None
         self.parser = CommandParser()
-        # RL agent init Logic
-        self.rl_agent = DQNAgent(state_dim=8, action_dim=4)
+
+        self.rl_agent = DQNAgent(state_dim=8, action_dim=3)
+        # Load model (Update path to where you put the .pth file)
         self.rl_agent.load("src/cowrie/shell/dqn_cowrie_model.pth") 
         self.rl_agent.policy_net.eval()
+        
+        # ONLINE LEARNING STATE TRACKING
         self.session_duration = 0
         self.command_count = 0
-        # for online learning
         self.last_state = None
-        self.last_action = None
+        self.last_action = None        
         # this is the first prompt after starting
+
         self.showPrompt()
 
     # new lineReceived function specifically for RL agent that calls the pre-existing lineReceived function(now renamed to _internal_lineReceived) 
@@ -108,36 +111,35 @@ class HoneyPotShell:
         # 3. Get New Action
         # Use epsilon=0.05 to keep exploring a little bit (5%)
         # Or set training=False to be purely exploited.
-        self.rl_agent.epsilon = 0.04
+        self.rl_agent.epsilon = 0.02 
         action = self.rl_agent.get_action(current_state, training=True)
-        print("HELLO WORLD CHECK")
-
+        
         # LOGGING: Record the action for analysis
-        action_names = ['ALLOW', 'FAKE', 'DELAY', 'BLOCK']
+        action_names = ['ALLOW', 'DELAY', 'BLOCK']
         log.msg(eventid='cowrie.rl.action', 
                 action_code=action, 
                 action_name=action_names[action], 
                 state_summary=f"{self.session_duration}:{self.command_count}",
                 format="RL Action: %(action_name)s (State: %(state_summary)s)"
-        )        
+        )
         self.last_state = current_state
         self.last_action = action
         
         # 4. Execute Action
-        if action == 3: # BLOCK
+        # Action Map: 0=ALLOW, 1=DELAY, 2=BLOCK
+        if action == 2: # BLOCK
             self.protocol.terminal.loseConnection()
             return
-        elif action == 2: # DELAY
+        elif action == 1: # DELAY
             from twisted.internet import reactor
             reactor.callLater(2.0, self._internal_lineReceived, line)
             return
-        elif action == 1: # FAKE
-            parts = line.strip().split()
-            if len(parts) > 1:
-                create_fake_file(self.protocol, parts[-1]) 
         
+        # FAKE action removed. Default is ALLOW (0)
         self._internal_lineReceived(line)
         # --- RL AGENT LOGIC END ---
+
+
 
     def _internal_lineReceived(self, line: str) -> None:
         log.msg(eventid="cowrie.command.input", input=line, format="CMD: %(input)s")
@@ -241,9 +243,7 @@ class HoneyPotShell:
             # Bonus +10 if they stayed for > 10 commands
             # Penalty -10 if they left immediately (< 2 commands)
             final_reward = -1.0
-            if self.last_action == 3:
-                final_reward = 6
-            elif self.command_count > 10:
+            if self.command_count > 10:
                 final_reward = 10.0
             elif self.command_count < 2:
                 final_reward = -10.0
@@ -264,7 +264,6 @@ class HoneyPotShell:
         # If this class doesn't inherit connectionLost logic, you might not need super(),
         # but check the parent class.
         pass
-
 
     def do_subshell_execution_from_lexer(self) -> None:
         """
